@@ -320,3 +320,47 @@ func NewContext() *Context {
 		scale:    12 << 6,
 	}
 }
+
+// MeasureString returns the width and height of the string in s, in terms of
+// raster.Fix32 units.
+//
+// BUG(burntsushi): I don't think negative x-coordinates are handled at all, so
+// that the bounding box could be smaller than what it actually is. (i.e., the
+// first letter is an italic 'J'.)
+func (c *Context) MeasureString(s string) (raster.Fix32, raster.Fix32, error) {
+	if c.font == nil {
+		return 0, 0, errors.New("freetype: DrawText called with a nil font")
+	}
+
+	var width, height, heightMax raster.Fix32
+	oneLine := c.PointToFix32(c.fontSize) & 0xff
+	height = c.PointToFix32(c.fontSize)
+	prev, hasPrev := truetype.Index(0), false
+	for _, rune := range s {
+		index := c.font.Index(rune)
+		if hasPrev {
+			width += raster.Fix32(c.font.Kerning(c.scale, prev, index)) << 2
+		}
+
+		if err := c.glyphBuf.Load(c.font, c.scale, index, truetype.Hinting(c.hinting)); err != nil {
+			return 0, 0, err
+		}
+		ymax := oneLine - raster.Fix32(c.glyphBuf.B.YMin<<2) + 0xff
+		heightMax = max(heightMax, ymax)
+
+		width += raster.Fix32(c.font.HMetric(c.scale, index).AdvanceWidth) << 2
+		prev, hasPrev = index, true
+	}
+
+	if heightMax > 0 {
+		height += heightMax
+	}
+	return width, height, nil
+}
+
+func max(a, b raster.Fix32) raster.Fix32 {
+	if a > b {
+		return a
+	}
+	return b
+}
